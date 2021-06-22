@@ -4,6 +4,7 @@ defmodule Squabble.Server do
   """
 
   alias Squabble.PG
+  alias Squabble.Raft
   alias Squabble.State
 
   require Logger
@@ -53,7 +54,7 @@ defmodule Squabble.Server do
     Logger.debug("Checking for a current leader.", type: :squabble)
 
     PG.broadcast([others: true], fn pid ->
-      Squabble.leader_check(pid)
+      Raft.leader_check(pid)
     end)
 
     {:ok, state}
@@ -66,7 +67,7 @@ defmodule Squabble.Server do
   def leader_check(state, pid) do
     case state.state do
       "leader" ->
-        Squabble.notify_of_leader(pid, state.term)
+        Raft.notify_of_leader(pid, state.term)
         {:ok, state}
 
       _ ->
@@ -88,7 +89,7 @@ defmodule Squabble.Server do
           voted_leader(state, 1)
         else
           PG.broadcast(fn pid ->
-            Squabble.announce_candidate(pid, term)
+            Raft.announce_candidate(pid, term)
           end)
 
           Process.send_after(
@@ -126,7 +127,7 @@ defmodule Squabble.Server do
 
     with {:ok, :newer} <- check_term_newer(state, term),
          {:ok, :not_voted} <- check_voted(state) do
-      Squabble.vote_for(pid, term)
+      Raft.vote_for(pid, term)
       {:ok, %{state | voted_for: pid, highest_seen_term: term}}
     else
       {:error, :same} ->
@@ -153,7 +154,7 @@ defmodule Squabble.Server do
          {:ok, state} <- append_vote(state, pid),
          {:ok, :majority} <- check_majority_votes(state) do
       PG.broadcast([others: true], fn pid ->
-        Squabble.new_leader(pid, term)
+        Raft.new_leader(pid, term)
       end)
 
       voted_leader(state, term)
@@ -204,7 +205,7 @@ defmodule Squabble.Server do
           "Another node has the same term and is a leader, starting a new term"
         end, type: :squabble)
 
-        Squabble.start_election(state.term + 1)
+        Raft.start_election(state.term + 1)
 
         {:ok, state}
 
@@ -235,7 +236,7 @@ defmodule Squabble.Server do
         end, type: :squabble)
 
         PG.broadcast([others: true], fn pid ->
-          Squabble.new_leader(pid, state.term)
+          Raft.new_leader(pid, state.term)
         end)
 
         Enum.each(winner_subscriptions(state), fn module ->
@@ -258,7 +259,7 @@ defmodule Squabble.Server do
 
     case state.leader_node do
       ^node ->
-        Squabble.start_election(state.term + 1)
+        Raft.start_election(state.term + 1)
 
         {:ok, state}
 
@@ -268,7 +269,7 @@ defmodule Squabble.Server do
   end
 
   defp send_node_down_notice(state) do
-    case Squabble.node_is_leader?() do
+    case Raft.node_is_leader?() do
       true ->
         Enum.map(winner_subscriptions(state), fn module ->
           module.node_down()
@@ -372,7 +373,7 @@ defmodule Squabble.Server do
   defp _check_election_status(state, term) do
     case state.state do
       "candidate" ->
-        Squabble.start_election(term + 1)
+        Raft.start_election(term + 1)
 
         {:ok, state}
 
